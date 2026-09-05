@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Client-Side Object Detection</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0;
+      padding: 20px;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 640px;
+      margin-top: 15px;
+    }
+    video, canvas {
+      width: 100%;
+      border-radius: 8px;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      font-weight: bold;
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Client-Side Object Detection</h2>
+  <button id="toggle-cam">Start Camera</button>
+
+  <div class="video-container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+    const toggleBtn = document.getElementById('toggle-cam');
+
+    let model = null;
+    let isDetecting = false;
+
+    // Load lightweight COCO-SSD model directly into the browser
+    cocoSsd.load().then(loadedModel => {
+      model = loadedModel;
+      toggleBtn.innerText = "Start Camera";
+    });
+
+    toggleBtn.addEventListener('click', async () => {
+      if (!isDetecting) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment", width: 640, height: 480 },
+            audio: false
+          });
+          video.srcObject = stream;
+          video.onloadedmetadata = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            isDetecting = true;
+            toggleBtn.innerText = "Stop Camera";
+            detectFrame();
+          };
+        } catch (err) {
+          alert("Camera access denied or unavailable: " + err.message);
+        }
+      } else {
+        const stream = video.srcObject;
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+        isDetecting = false;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        toggleBtn.innerText = "Start Camera";
+      }
+    });
+
+    async function detectFrame() {
+      if (!isDetecting) return;
+
+      const predictions = await model.detect(video);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      predictions.forEach(prediction => {
+        // Filter classes or set threshold (e.g., score > 0.6)
+        if (prediction.score > 0.6) {
+          const [x, y, width, height] = prediction.bbox;
+
+          ctx.strokeStyle = "#22c55e";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(x, y, width, height);
+
+          ctx.fillStyle = "#22c55e";
+          ctx.font = "16px sans-serif";
+          ctx.fillText(
+            `${prediction.class} (${Math.round(prediction.score * 100)}%)`,
+            x,
+            y > 20 ? y - 6 : y + 15
+          );
+        }
+      });
+
+      requestAnimationFrame(detectFrame);
+    }
+  </script>
+</body>
+</html>
