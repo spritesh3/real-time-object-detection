@@ -1,22 +1,21 @@
-import streamlit as st
+import os
+import tempfile
 import cv2
 import torch
 import numpy as np
-from ultralytics import YOLO
 from PIL import Image
-import tempfile
-import os
+from ultralytics import YOLO
 import av
+import streamlit as st
 from streamlit_webrtc import (
     webrtc_streamer,
-    VideoProcessorBase,
     RTCConfiguration,
     WebRtcMode,
 )
 
 st.set_page_config(page_title="Real-Time Object Detection", layout="wide")
 
-# Cache model loading so it executes only once per session
+# Cache model loading to avoid redundant disk I/O on UI interactions
 @st.cache_resource
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -28,7 +27,7 @@ model, device = load_model()
 # COCO Class IDs: 0: Person, 39: Bottle, 40: Wine Glass, 41: Cup
 ALLOWED_CLASSES = [0, 39, 40, 41]
 
-def process_frame(frame, conf_threshold=0.5):
+def process_frame(frame: np.ndarray, conf_threshold: float = 0.5) -> np.ndarray:
     results = model(frame, device=device, verbose=False)[0]
     for box in results.boxes:
         conf = float(box.conf[0].item())
@@ -59,7 +58,7 @@ if mode == "Image":
     if uploaded_file:
         image = Image.open(uploaded_file).convert("RGB")
         img_np = np.array(image)
-        # Convert RGB to BGR for OpenCV processing, then back to RGB for display
+        # Convert RGB to BGR for OpenCV processing, then convert back for display
         img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
         processed = process_frame(img_bgr)
         processed_rgb = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
@@ -85,13 +84,13 @@ elif mode == "Video":
         os.remove(tfile.name)
 
 elif mode == "Live Webcam":
-    class YOLOVideoProcessor(VideoProcessorBase):
-        def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-            img = frame.to_ndarray(format="bgr24")
-            processed = process_frame(img)
-            return av.VideoFrame.from_ndarray(processed, format="bgr24")
+    # Modern functional frame callback for streamlit-webrtc
+    def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="bgr24")
+        processed = process_frame(img)
+        return av.VideoFrame.from_ndarray(processed, format="bgr24")
 
-    # STUN server configuration to bypass NAT/firewall restrictions on cloud instances
+    # STUN configuration to bypass cloud NAT/firewalls
     rtc_configuration = RTCConfiguration(
         {
             "iceServers": [
@@ -105,7 +104,7 @@ elif mode == "Live Webcam":
         key="object-detection",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration=rtc_configuration,
-        video_processor_factory=YOLOVideoProcessor,
+        video_frame_callback=video_frame_callback,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
     )
